@@ -45,5 +45,6 @@ router.post(
   authMiddleware,
   authController.logout
 );
+console.log("Auth routes loaded");
 
 module.exports = router;
