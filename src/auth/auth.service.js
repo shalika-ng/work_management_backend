@@ -3,6 +3,7 @@ const bcrypt = require("bcrypt");
 const jwt = require("jsonwebtoken");
 
 const pool = require("../config/database");
+const projectsService = require("../projects/projects.service");
 
 
 // ==========================
@@ -13,8 +14,8 @@ const loginUser = async (email, password) => {
 
   // Find user by email
   const result = await pool.query(
-    "SELECT * FROM users WHERE email = $1",
-    [email]
+    "SELECT * FROM users WHERE lower(email) = $1",
+    [email.trim().toLowerCase()]
   );
 
   // User not found
@@ -34,24 +35,79 @@ const loginUser = async (email, password) => {
     throw new Error("Invalid email or password");
   }
 
-  // Find user's workspace
+  // If the user has any pending workspace invites for this email,
+  // accept them automatically when they log in.
+  const pendingInvites = await pool.query(
+    `
+    SELECT id, workspace_id
+    FROM workspace_invitations
+    WHERE lower(email) = $1
+      AND accepted_at IS NULL
+      AND expires_at > CURRENT_TIMESTAMP
+    ORDER BY created_at DESC
+    `,
+    [user.email.trim().toLowerCase()]
+  );
+
+  if (pendingInvites.rows.length > 0) {
+    for (const invite of pendingInvites.rows) {
+      const existingMembership = await pool.query(
+        `
+        SELECT 1
+        FROM workspace_members
+        WHERE user_id = $1 AND workspace_id = $2
+        `,
+        [user.id, invite.workspace_id]
+      );
+
+      if (existingMembership.rowCount === 0) {
+        await pool.query(
+          `
+          INSERT INTO workspace_members (workspace_id, user_id, role, status)
+          VALUES ($1, $2, 'MEMBER', 'ACTIVE')
+          ON CONFLICT (workspace_id, user_id)
+          DO UPDATE SET
+            role = CASE
+              WHEN workspace_members.role IN ('OWNER', 'ADMIN')
+              THEN workspace_members.role
+              ELSE 'MEMBER'
+            END,
+            status = 'ACTIVE',
+            updated_at = CURRENT_TIMESTAMP
+          `,
+          [invite.workspace_id, user.id]
+        );
+      }
+
+      await pool.query(
+        `
+        UPDATE workspace_invitations
+        SET accepted_at = CURRENT_TIMESTAMP
+        WHERE id = $1
+        `,
+        [invite.id]
+      );
+    }
+  }
+
+  // Load only workspaces and projects the user belongs to.
   const workspaceResult = await pool.query(
     `
     SELECT
       w.id,
-      w.name
+      w.name,
+      wm.role
     FROM workspace_members wm
     JOIN workspaces w
       ON w.id = wm.workspace_id
     WHERE wm.user_id = $1
       AND wm.status = 'ACTIVE'
-    LIMIT 1
+    ORDER BY w.id
     `,
     [user.id]
   );
 
-  // Get workspace
-  const workspace = workspaceResult.rows[0];
+  const projects = await projectsService.getAllProjects(user.id);
 
   // Generate JWT token
   const token = jwt.sign(
@@ -75,12 +131,9 @@ const loginUser = async (email, password) => {
       email: user.email,
     },
 
-    workspace: workspace
-      ? {
-          id: workspace.id,
-          name: workspace.name,
-        }
-      : null,
+    workspace: workspaceResult.rows[0] || null,
+    workspaces: workspaceResult.rows,
+    projects,
   };
 };
 
@@ -92,10 +145,12 @@ const signupUser = async (
   name,
   email,
   password,
-  workspaceName
+  workspaceName,
+  inviteToken
 ) => {
 
   // Get a database client
+  const normalizedEmail = email.trim().toLowerCase();
   const client = await pool.connect();
 
   try {
@@ -109,8 +164,8 @@ const signupUser = async (
     // ==========================
 
     const existingUser = await client.query(
-      "SELECT id FROM users WHERE email = $1",
-      [email]
+      "SELECT id FROM users WHERE lower(email) = $1",
+      [normalizedEmail]
     );
 
     if (existingUser.rows.length > 0) {
@@ -144,57 +199,52 @@ const signupUser = async (
       `,
       [
         name,
-        email,
+        normalizedEmail,
         hashedPassword,
       ]
     );
 
     const user = userResult.rows[0];
 
+    let workspace;
+    let role;
 
-    // ==========================
-    // 4. CREATE WORKSPACE
-    // ==========================
-
-    const workspaceResult = await client.query(
-      `
-      INSERT INTO workspaces (
-        name,
-        created_by
-      )
-      VALUES ($1, $2)
-      RETURNING id, name
-      `,
-      [
-        workspaceName,
+    if (inviteToken) {
+      const membership =
+        await projectsService.acceptWorkspaceInvitationWithClient(
+        client,
         user.id,
-      ]
-    );
+        normalizedEmail,
+        inviteToken
+      );
+      const workspaceResult = await client.query(
+        "SELECT id, name FROM workspaces WHERE id = $1",
+        [membership.workspace_id]
+      );
+      workspace = workspaceResult.rows[0];
+      role = membership.role;
+    } else {
+      const workspaceResult = await client.query(
+        `
+        INSERT INTO workspaces (name, created_by)
+        VALUES ($1, $2)
+        RETURNING id, name
+        `,
+        [workspaceName, user.id]
+      );
+      workspace = workspaceResult.rows[0];
+      role = "ADMIN";
 
-    const workspace = workspaceResult.rows[0];
-
-
-    // ==========================
-    // 5. ADD USER TO WORKSPACE
-    // ==========================
-
-    await client.query(
-      `
-      INSERT INTO workspace_members (
-        workspace_id,
-        user_id,
-        role,
-        status
-      )
-      VALUES ($1, $2, $3, $4)
-      `,
-      [
-        workspace.id,
-        user.id,
-        "OWNER",
-        "ACTIVE",
-      ]
-    );
+      await client.query(
+        `
+        INSERT INTO workspace_members (
+          workspace_id, user_id, role, status
+        )
+        VALUES ($1, $2, $3, 'ACTIVE')
+        `,
+        [workspace.id, user.id, role]
+      );
+    }
 
 
     // ==========================
@@ -236,7 +286,9 @@ const signupUser = async (
       workspace: {
         id: workspace.id,
         name: workspace.name,
+        role,
       },
+      role,
     };
 
   } catch (error) {

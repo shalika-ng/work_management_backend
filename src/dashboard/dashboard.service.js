@@ -1,4 +1,5 @@
 const dashboardModel = require("../models/dashboard.model");
+const projectsModel = require("../models/projects.model");
 
 const getDashboard = async (userId) => {
   const user = await dashboardModel.findUserById(userId);
@@ -9,6 +10,8 @@ const getDashboard = async (userId) => {
 
   const taskStats = await dashboardModel.getTaskStats(userId);
   const workspace = await dashboardModel.getWorkspaceByUserId(userId);
+  const projects = await projectsModel.getAllProjects(userId);
+  const tasks = await dashboardModel.getTasksByUserId(userId);
 
   const now = new Date();
 
@@ -29,6 +32,9 @@ const getDashboard = async (userId) => {
       overdue_tasks: Number(taskStats.overdue_tasks),
       due_today: Number(taskStats.due_today),
     },
+
+    projects,
+    tasks,
 
     workspace: workspace
       ? {

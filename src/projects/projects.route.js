@@ -18,4 +18,20 @@ router.put(
   projectsController.editProject
 );
 
+router.post(
+  "/workspaces/:workspaceId/invitations",
+  authMiddleware,
+  projectsController.createWorkspaceInvitation
+);
+router.post(
+  "/workspaces/:workspaceId/members",
+  authMiddleware,
+  projectsController.createWorkspaceMember
+);
+router.get(
+  "/workspaces/:workspaceId/members",
+  authMiddleware,
+  projectsController.getWorkspaceMembers
+);
+
 module.exports = router;

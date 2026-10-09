@@ -7,7 +7,7 @@ const authService = require("./auth.service");
 
 const login = async (req, res) => {
   try {
-    const { email, password } = req.body;
+    const { email, password } = req.body || {};
 
     // Validate request body
     if (!email || !password) {
@@ -43,32 +43,50 @@ const login = async (req, res) => {
 
 const signup = async (req, res) => {
   try {
-    const {
-      name,
-      email,
-      password,
-      workspace_name,
-    } = req.body;
+    const body = req.body || {};
+    const name = typeof body.name === "string" ? body.name : "";
+    const email = typeof body.email === "string" ? body.email : "";
+    const password = body.password;
+    const workspaceName =
+      body.workspace_name ?? body.workspaceName ?? null;
+    const inviteToken =
+      body.invite_token ?? body.inviteToken ?? null;
+
+    const hasWorkspaceName =
+      typeof workspaceName === "string" && !!workspaceName.trim();
+    const hasInviteToken =
+      typeof inviteToken === "string" && !!inviteToken.trim();
 
     // Validate request body
     if (
-      !name ||
-      !email ||
+      !name.trim() ||
+      !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim()) ||
+      typeof password !== "string" ||
       !password ||
-      !workspace_name
+      (workspaceName !== null &&
+        workspaceName !== undefined &&
+        workspaceName !== "" &&
+        !hasWorkspaceName) ||
+      (inviteToken !== null &&
+        inviteToken !== undefined &&
+        inviteToken !== "" &&
+        !hasInviteToken) ||
+      (!hasWorkspaceName && !hasInviteToken) ||
+      (hasWorkspaceName && hasInviteToken)
     ) {
       return res.status(400).json({
         success: false,
         message:
-          "Name, email, password and workspace name are required",
+          "Name, email and password are required; provide either a workspace name or an invitation token",
       });
     }
 
     const result = await authService.signupUser(
-      name,
-      email,
+      name.trim(),
+      email.trim(),
       password,
-      workspace_name
+      hasWorkspaceName ? workspaceName.trim() : undefined,
+      hasInviteToken ? inviteToken.trim() : undefined
     );
 
     return res.status(201).json({
