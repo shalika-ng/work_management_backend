@@ -174,6 +174,148 @@ const createTask = async (req, res) => {
   }
 };
 
+const editTask = async (req, res) => {
+  try {
+    const taskId = Number(req.params.taskId);
+    const body = req.body;
+    const allowedFields = new Set([
+      "name",
+      "description",
+      "assignee_id",
+      "due_date",
+      "priority",
+    ]);
+
+    if (!Number.isSafeInteger(taskId) || taskId <= 0) {
+      return res.status(400).json({
+        success: false,
+        message: "Task ID must be a valid number",
+      });
+    }
+
+    if (!body || typeof body !== "object" || Array.isArray(body)) {
+      return res.status(400).json({
+        success: false,
+        message: "Request body must be an object",
+      });
+    }
+
+    const providedFields = Object.keys(body);
+    if (providedFields.length === 0) {
+      return res.status(400).json({
+        success: false,
+        message: "At least one task field must be provided",
+      });
+    }
+
+    const unsupportedFields = providedFields.filter(
+      (field) => !allowedFields.has(field)
+    );
+    if (unsupportedFields.length > 0) {
+      return res.status(400).json({
+        success: false,
+        message: `Unsupported task field(s): ${unsupportedFields.join(", ")}`,
+      });
+    }
+
+    const changes = {};
+
+    if (Object.hasOwn(body, "name")) {
+      if (typeof body.name !== "string" || !body.name.trim()) {
+        return res.status(400).json({
+          success: false,
+          message: "Task name must be a non-empty string",
+        });
+      }
+      if (body.name.trim().length > 200) {
+        return res.status(400).json({
+          success: false,
+          message: "Task name must be 200 characters or fewer",
+        });
+      }
+      changes.name = body.name.trim();
+    }
+
+    if (Object.hasOwn(body, "description")) {
+      if (body.description !== null && typeof body.description !== "string") {
+        return res.status(400).json({
+          success: false,
+          message: "Description must be a string or null",
+        });
+      }
+      changes.description = body.description || null;
+    }
+
+    if (Object.hasOwn(body, "assignee_id")) {
+      if (body.assignee_id === null || body.assignee_id === "") {
+        changes.assigneeId = null;
+      } else {
+        const assigneeId = Number(body.assignee_id);
+        if (!Number.isSafeInteger(assigneeId) || assigneeId <= 0) {
+          return res.status(400).json({
+            success: false,
+            message: "Assignee ID must be a valid number or null",
+          });
+        }
+        changes.assigneeId = assigneeId;
+      }
+    }
+
+    if (Object.hasOwn(body, "due_date")) {
+      if (body.due_date === null || body.due_date === "") {
+        changes.dueDate = null;
+      } else {
+        const dueDate = body.due_date;
+        const parsedDate =
+          typeof dueDate === "string" &&
+          /^\d{4}-\d{2}-\d{2}$/.test(dueDate)
+            ? new Date(`${dueDate}T00:00:00.000Z`)
+            : null;
+        if (
+          !parsedDate ||
+          Number.isNaN(parsedDate.getTime()) ||
+          parsedDate.toISOString().slice(0, 10) !== dueDate
+        ) {
+          return res.status(400).json({
+            success: false,
+            message: "Due date must be a valid date in YYYY-MM-DD format or null",
+          });
+        }
+        changes.dueDate = dueDate;
+      }
+    }
+
+    if (Object.hasOwn(body, "priority")) {
+      const priority = Number(body.priority);
+      if (!Number.isInteger(priority) || ![1, 2, 3].includes(priority)) {
+        return res.status(400).json({
+          success: false,
+          message: "Priority must be 1 (Low), 2 (Medium), or 3 (High)",
+        });
+      }
+      changes.priority = priority;
+    }
+
+    const task = await tasksService.editTask({
+      taskId,
+      changes,
+      userId: req.user.id,
+    });
+
+    return res.status(200).json({
+      success: true,
+      message: "Task updated successfully",
+      data: task,
+    });
+  } catch (error) {
+    console.error("Edit task error:", error);
+    return res.status(error.statusCode || 500).json({
+      success: false,
+      message: error.statusCode ? error.message : "Failed to update task",
+    });
+  }
+};
+
 const updateTaskStatus = async (req, res) => {
   try {
     const taskId = Number(req.params.taskId);
@@ -295,6 +437,7 @@ const getTasksByProjectMember = async (req, res) => {
 
 module.exports = {
   createTask,
+  editTask,
   updateTaskStatus,
   getTasksByProject,
   getTasksByProjectMember,

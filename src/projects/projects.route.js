@@ -6,6 +6,16 @@ const authMiddleware = require("../middleware/auth.middleware");
 const router = express.Router();
 
 router.get("/projects", authMiddleware, projectsController.getProjects);
+router.get(
+  "/projects/report-summary",
+  authMiddleware,
+  projectsController.getProjectReportSummary
+);
+router.get(
+  "/projects/:projectId/members/:memberId/task-progress",
+  authMiddleware,
+  projectsController.getProjectMemberTaskProgress
+);
 router.post(
   "/create-project",
   authMiddleware,

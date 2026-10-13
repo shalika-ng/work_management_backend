@@ -11,6 +11,12 @@ router.post(
   tasksController.createTask
 );
 router.patch(
+  "/:taskId",
+  authMiddleware,
+  tasksController.editTask
+);
+
+router.patch(
   "/:taskId/status",
   authMiddleware,
   tasksController.updateTaskStatus

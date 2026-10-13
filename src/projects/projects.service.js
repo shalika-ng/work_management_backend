@@ -35,6 +35,306 @@ const projectSelect = `
 
 const getAllProjects = (userId) => projectsModel.getAllProjects(userId);
 
+const getProjectReportSummary = async (userId) => {
+  const result = await pool.query(
+    `
+    WITH visible_projects AS (
+      SELECT p.*
+      FROM projects p
+      WHERE
+        (
+          p.workspace_id IS NOT NULL
+          AND EXISTS (
+            SELECT 1
+            FROM workspace_members wm
+            WHERE wm.workspace_id = p.workspace_id
+              AND wm.user_id = $1
+              AND wm.status = 'ACTIVE'
+          )
+        )
+        OR (
+          p.workspace_id IS NULL
+          AND (
+            p.created_by = $1
+            OR EXISTS (
+              SELECT 1
+              FROM project_members pm
+              WHERE pm.project_id = p.id
+                AND pm.user_id = $1
+            )
+          )
+        )
+    ),
+    project_tasks AS (
+      SELECT
+        t.project_id,
+        COUNT(*) AS total_tasks,
+        COUNT(*) FILTER (WHERE t.status = 6) AS closed_tasks,
+        COUNT(*) FILTER (WHERE t.status = 7) AS completed_tasks,
+        jsonb_build_object(
+          'needs_triage', COUNT(*) FILTER (WHERE t.status = 1),
+          'fixing', COUNT(*) FILTER (WHERE t.status = 2),
+          'ready_for_retest', COUNT(*) FILTER (WHERE t.status = 3),
+          'retest', COUNT(*) FILTER (WHERE t.status = 4),
+          'verified', COUNT(*) FILTER (WHERE t.status = 5),
+          'closed', COUNT(*) FILTER (WHERE t.status = 6),
+          'completed', COUNT(*) FILTER (WHERE t.status = 7)
+        ) AS status_counts,
+        jsonb_agg(
+          jsonb_build_object(
+            'id', t.id,
+            'name', t.name,
+            'assignee_id', t.assignee_id,
+            'assignee_name', assignee.name,
+            'due_date', t.due_date,
+            'priority', t.priority,
+            'status', t.status
+          )
+          ORDER BY t.created_at DESC, t.id DESC
+        ) AS tasks
+      FROM tasks t
+      LEFT JOIN users assignee ON assignee.id = t.assignee_id
+      JOIN visible_projects vp ON vp.id = t.project_id
+      GROUP BY t.project_id
+    ),
+    project_member_rows AS (
+      SELECT
+        vp.id AS project_id,
+        u.id,
+        u.name,
+        wm.role
+      FROM visible_projects vp
+      JOIN workspace_members wm
+        ON wm.workspace_id = vp.workspace_id
+        AND wm.status = 'ACTIVE'
+      JOIN users u ON u.id = wm.user_id
+      WHERE vp.workspace_id IS NOT NULL
+
+      UNION
+
+      SELECT
+        vp.id AS project_id,
+        u.id,
+        u.name,
+        CASE WHEN u.id = vp.created_by THEN 'ADMIN' ELSE 'MEMBER' END AS role
+      FROM visible_projects vp
+      JOIN project_members pm ON pm.project_id = vp.id
+      JOIN users u ON u.id = pm.user_id
+      WHERE vp.workspace_id IS NULL
+
+      UNION
+
+      SELECT
+        vp.id AS project_id,
+        u.id,
+        u.name,
+        'ADMIN' AS role
+      FROM visible_projects vp
+      JOIN users u ON u.id = vp.created_by
+      WHERE vp.workspace_id IS NULL
+    ),
+    project_members AS (
+      SELECT
+        pm.project_id,
+        jsonb_agg(
+          jsonb_build_object('id', pm.id, 'name', pm.name, 'role', pm.role)
+          ORDER BY pm.name, pm.id
+        ) AS members
+      FROM project_member_rows pm
+      GROUP BY pm.project_id
+    )
+    SELECT
+      vp.id,
+      vp.name,
+      vp.description,
+      vp.workspace_id,
+      vp.status,
+      vp.created_by,
+      vp.created_at,
+      COALESCE(pm.members, '[]'::jsonb) AS members,
+      COALESCE(pt.tasks, '[]'::jsonb) AS tasks,
+      COALESCE(pt.total_tasks, 0) AS total_tasks,
+      COALESCE(pt.closed_tasks, 0) AS closed_tasks,
+      COALESCE(pt.completed_tasks, 0) AS completed_tasks,
+      COALESCE(pt.status_counts, jsonb_build_object(
+        'needs_triage', 0,
+        'fixing', 0,
+        'ready_for_retest', 0,
+        'retest', 0,
+        'verified', 0,
+        'closed', 0,
+        'completed', 0
+      )) AS status_counts
+    FROM visible_projects vp
+    LEFT JOIN project_tasks pt ON pt.project_id = vp.id
+    LEFT JOIN project_members pm ON pm.project_id = vp.id
+    ORDER BY vp.created_at DESC, vp.id DESC
+    `,
+    [userId]
+  );
+
+  return result.rows.map((project) => {
+    const totalTasks = Number(project.total_tasks);
+    const closedTasks = Number(project.closed_tasks);
+    const completedTasks = Number(project.completed_tasks);
+    const resolvedTasks = closedTasks + completedTasks;
+
+    return {
+      id: project.id,
+      name: project.name,
+      description: project.description,
+      workspace_id: project.workspace_id,
+      status: project.status,
+      created_by: project.created_by,
+      created_at: project.created_at,
+      members: project.members,
+      tasks: project.tasks,
+      task_summary: {
+        total: totalTasks,
+        closed: closedTasks,
+        completed: completedTasks,
+        completion_percentage: totalTasks
+          ? Math.round((resolvedTasks / totalTasks) * 100)
+          : 0,
+        status_counts: project.status_counts,
+      },
+    };
+  });
+};
+
+const getProjectMemberTaskProgress = async ({
+  projectId,
+  memberId,
+  requesterId,
+}) => {
+  const projectResult = await pool.query(
+    `
+    SELECT p.id
+    FROM projects p
+    WHERE p.id = $1
+      AND p.status = 1
+      AND (
+        (
+          p.workspace_id IS NOT NULL
+          AND EXISTS (
+            SELECT 1
+            FROM workspace_members wm
+            WHERE wm.workspace_id = p.workspace_id
+              AND wm.user_id = $3
+              AND wm.status = 'ACTIVE'
+          )
+        )
+        OR (
+          p.workspace_id IS NULL
+          AND (
+            p.created_by = $3
+            OR EXISTS (
+              SELECT 1
+              FROM project_members pm
+              WHERE pm.project_id = p.id
+                AND pm.user_id = $3
+            )
+          )
+        )
+      )
+      AND (
+        (
+          p.workspace_id IS NOT NULL
+          AND EXISTS (
+            SELECT 1
+            FROM workspace_members member
+            WHERE member.workspace_id = p.workspace_id
+              AND member.user_id = $2
+              AND member.status = 'ACTIVE'
+          )
+        )
+        OR (
+          p.workspace_id IS NULL
+          AND (
+            p.created_by = $2
+            OR EXISTS (
+              SELECT 1
+              FROM project_members pm
+              WHERE pm.project_id = p.id
+                AND pm.user_id = $2
+            )
+          )
+        )
+      )
+    `,
+    [projectId, memberId, requesterId]
+  );
+
+  if (projectResult.rowCount === 0) {
+    const error = new Error(
+      "Project not found or the member is not part of this project"
+    );
+    error.statusCode = 404;
+    throw error;
+  }
+
+  const result = await pool.query(
+    `
+    SELECT
+      u.id AS member_id,
+      u.name AS member_name,
+      COUNT(t.id) AS total_tasks,
+      COUNT(t.id) FILTER (WHERE t.status = 6) AS closed_tasks,
+      COUNT(t.id) FILTER (WHERE t.status = 7) AS completed_tasks,
+      jsonb_build_object(
+        'needs_triage', COUNT(t.id) FILTER (WHERE t.status = 1),
+        'fixing', COUNT(t.id) FILTER (WHERE t.status = 2),
+        'ready_for_retest', COUNT(t.id) FILTER (WHERE t.status = 3),
+        'retest', COUNT(t.id) FILTER (WHERE t.status = 4),
+        'verified', COUNT(t.id) FILTER (WHERE t.status = 5),
+        'closed', COUNT(t.id) FILTER (WHERE t.status = 6),
+        'completed', COUNT(t.id) FILTER (WHERE t.status = 7)
+      ) AS status_counts,
+      COALESCE(
+        jsonb_agg(
+          jsonb_build_object(
+            'id', t.id,
+            'name', t.name,
+            'due_date', t.due_date,
+            'priority', t.priority,
+            'status', t.status
+          )
+          ORDER BY t.created_at DESC, t.id DESC
+        ) FILTER (WHERE t.id IS NOT NULL),
+        '[]'::jsonb
+      ) AS tasks
+    FROM users u
+    LEFT JOIN tasks t
+      ON t.assignee_id = u.id
+      AND t.project_id = $1
+    WHERE u.id = $2
+    GROUP BY u.id, u.name
+    `,
+    [projectId, memberId]
+  );
+  const memberProgress = result.rows[0];
+  const totalTasks = Number(memberProgress.total_tasks);
+  const closedTasks = Number(memberProgress.closed_tasks);
+  const completedTasks = Number(memberProgress.completed_tasks);
+
+  return {
+    member: {
+      id: memberProgress.member_id,
+      name: memberProgress.member_name,
+    },
+    tasks: memberProgress.tasks,
+    task_summary: {
+      total: totalTasks,
+      closed: closedTasks,
+      completed: completedTasks,
+      completion_percentage: totalTasks
+        ? Math.round(((closedTasks + completedTasks) / totalTasks) * 100)
+        : 0,
+      status_counts: memberProgress.status_counts,
+    },
+  };
+};
+
 const getProjectById = async (client, projectId, userId) => {
   const result = await client.query(
     `
@@ -592,6 +892,8 @@ const acceptWorkspaceInvitation = async ({ userId, email, token }) => {
 
 module.exports = {
   getAllProjects,
+  getProjectReportSummary,
+  getProjectMemberTaskProgress,
   createProject,
   editProject,
   createWorkspaceInvitation,

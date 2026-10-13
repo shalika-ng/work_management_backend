@@ -175,6 +175,105 @@ const createTask = async ({
   }
 };
 
+const editTask = async ({ taskId, changes, userId }) => {
+  const client = await pool.connect();
+
+  try {
+    await client.query("BEGIN");
+
+    const taskResult = await client.query(
+      `
+      SELECT t.id, t.project_id, p.workspace_id
+      FROM tasks t
+      JOIN projects p ON p.id = t.project_id
+      WHERE t.id = $1
+        AND p.status = 1
+        AND (
+          t.assignee_id = $2
+          OR p.created_by = $2
+          OR (
+            p.workspace_id IS NOT NULL
+            AND EXISTS (
+              SELECT 1
+              FROM workspace_members wm
+              WHERE wm.workspace_id = p.workspace_id
+                AND wm.user_id = $2
+                AND wm.status = 'ACTIVE'
+                AND wm.role IN ('OWNER', 'ADMIN')
+            )
+          )
+        )
+      FOR UPDATE OF t
+      `,
+      [taskId, userId]
+    );
+
+    if (taskResult.rowCount === 0) {
+      const error = new Error(
+        "Task not found or you are not allowed to edit it"
+      );
+      error.statusCode = 404;
+      throw error;
+    }
+
+    if (Object.hasOwn(changes, "assigneeId") && changes.assigneeId !== null) {
+      const project = taskResult.rows[0];
+      const assigneeResult = await client.query(
+        `
+        SELECT 1
+        FROM projects p
+        WHERE p.id = $1
+          AND (
+            (
+              p.workspace_id IS NOT NULL
+              AND EXISTS (
+                SELECT 1
+                FROM workspace_members wm
+                WHERE wm.workspace_id = p.workspace_id
+                  AND wm.user_id = $2
+                  AND wm.status = 'ACTIVE'
+              )
+            )
+            OR (
+              p.workspace_id IS NULL
+              AND (
+                p.created_by = $2
+                OR EXISTS (
+                  SELECT 1
+                  FROM project_members pm
+                  WHERE pm.project_id = p.id
+                    AND pm.user_id = $2
+                )
+              )
+            )
+          )
+        `,
+        [project.project_id, changes.assigneeId]
+      );
+
+      if (assigneeResult.rowCount === 0) {
+        const error = new Error("Assignee must be a member of this project");
+        error.statusCode = 400;
+        throw error;
+      }
+    }
+
+    const task = await tasksModel.updateTask(client, {
+      taskId,
+      changes,
+      userId,
+    });
+
+    await client.query("COMMIT");
+    return task;
+  } catch (error) {
+    await client.query("ROLLBACK");
+    throw error;
+  } finally {
+    client.release();
+  }
+};
+
 const updateTaskStatus = async ({ taskId, status, userId }) => {
   const result = await pool.query(
     `
@@ -422,6 +521,7 @@ const getTasksByProjectMember = async ({
 
 module.exports = {
   createTask,
+  editTask,
   updateTaskStatus,
   getTasksByProject,
   getTasksByProjectMember,

@@ -12,6 +12,7 @@ const getDashboard = async (userId) => {
   const workspace = await dashboardModel.getWorkspaceByUserId(userId);
   const projects = await projectsModel.getAllProjects(userId);
   const tasks = await dashboardModel.getTasksByUserId(userId);
+  const pendingTasks = tasks.filter((task) => ![6, 7].includes(task.status));
 
   const now = new Date();
 
@@ -34,6 +35,7 @@ const getDashboard = async (userId) => {
     },
 
     projects,
+    pending_tasks: pendingTasks,
     tasks,
 
     workspace: workspace

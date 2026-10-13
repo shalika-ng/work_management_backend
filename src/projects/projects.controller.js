@@ -19,6 +19,67 @@ const getProjects = async (req, res) => {
 	}
 };
 
+const getProjectReportSummary = async (req, res) => {
+  try {
+    const projects = await projectsService.getProjectReportSummary(req.user.id);
+
+    return res.status(200).json({
+      success: true,
+      message: "Project report summary fetched successfully",
+      data: projects,
+    });
+  } catch (error) {
+    console.error("Get project report summary error:", error);
+
+    return res.status(500).json({
+      success: false,
+      message: "Failed to fetch project report summary",
+    });
+  }
+};
+
+const getProjectMemberTaskProgress = async (req, res) => {
+  try {
+    const projectId = Number(req.params.projectId);
+    const memberId = Number(req.params.memberId);
+
+    if (!Number.isSafeInteger(projectId) || projectId <= 0) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid project ID",
+      });
+    }
+
+    if (!Number.isSafeInteger(memberId) || memberId <= 0) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid member ID",
+      });
+    }
+
+    const progress = await projectsService.getProjectMemberTaskProgress({
+      projectId,
+      memberId,
+      requesterId: req.user.id,
+    });
+
+    return res.status(200).json({
+      success: true,
+      message: "Member task progress fetched successfully",
+      data: progress,
+    });
+  } catch (error) {
+    console.error("Get project member task progress error:", error);
+
+    return res.status(error.statusCode || 500).json({
+      success: false,
+      message: error.statusCode
+        ? error.message
+        : "Failed to fetch member task progress",
+    });
+  }
+};
+
 // CREATE PROJECT
 
 const createProject = async (req, res) => {
@@ -273,6 +334,8 @@ const getWorkspaceMembers = async (req, res) => {
 
 module.exports = {
   getProjects,
+  getProjectReportSummary,
+  getProjectMemberTaskProgress,
   createProject,
   editProject,
   createWorkspaceInvitation,
