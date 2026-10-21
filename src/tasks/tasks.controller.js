@@ -435,11 +435,58 @@ const getTasksByProjectMember = async (req, res) => {
   }
 };
 
+// DELETE TASK API CONTROLLER
+
+const deleteTask = async (req, res) => {
+  try {
+    // Get task ID from URL parameters
+    const taskId = Number(req.params.taskId);
+
+
+    // Validate task ID
+    if (!Number.isSafeInteger(taskId) || taskId <= 0) {
+      return res.status(400).json({
+        success: false,
+        message: "Task ID must be a valid number",
+      });
+    }
+
+
+    // Get logged-in user ID from authentication middleware
+    const userId = req.user.id;
+
+
+    // Delete task
+    const task = await tasksService.deleteTask({
+      taskId,
+      userId,
+    });
+
+
+    return res.status(200).json({
+      success: true,
+      message: "Task deleted successfully",
+      data: task,
+    });
+  } catch (error) {
+    console.error("Delete task error:", error);
+
+
+    return res.status(error.statusCode || 500).json({
+      success: false,
+      message: error.statusCode
+        ? error.message
+        : "Failed to delete task",
+    });
+  }
+};
+
+
 module.exports = {
   createTask,
   editTask,
   updateTaskStatus,
   getTasksByProject,
   getTasksByProjectMember,
-
+  deleteTask
 };

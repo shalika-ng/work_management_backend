@@ -890,6 +890,58 @@ const acceptWorkspaceInvitation = async ({ userId, email, token }) => {
   }
 };
 
+
+// DELETE PROJECT SERVICE:
+
+
+const deleteProject = async ({ projectId, userId }) => {
+  const result = await pool.query(
+    `
+    UPDATE projects p
+    SET
+      status = 2,
+      updated_by = $2,
+      updated_at = CURRENT_TIMESTAMP
+    WHERE p.id = $1
+      AND p.status = 1
+      AND (
+        p.created_by = $2
+        OR (
+          p.workspace_id IS NOT NULL
+          AND EXISTS (
+            SELECT 1
+            FROM workspace_members wm
+            WHERE wm.workspace_id = p.workspace_id
+              AND wm.user_id = $2
+              AND wm.status = 'ACTIVE'
+              AND wm.role IN ('OWNER', 'ADMIN')
+          )
+        )
+      )
+    RETURNING
+      p.id,
+      p.name,
+      p.description,
+      p.status,
+      p.workspace_id,
+      p.updated_by,
+      p.updated_at
+    `,
+    [projectId, userId]
+  );
+
+  if (result.rowCount === 0) {
+    const error = new Error(
+      "Project not found, already inactive, or you are not allowed to deactivate it"
+    );
+    error.statusCode = 404;
+    throw error;
+  }
+
+  return result.rows[0];
+};
+
+
 module.exports = {
   getAllProjects,
   getProjectReportSummary,
@@ -901,4 +953,5 @@ module.exports = {
   getWorkspaceMembers,
   acceptWorkspaceInvitation,
   acceptWorkspaceInvitationWithClient,
+  deleteProject
 };

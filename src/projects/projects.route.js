@@ -44,4 +44,10 @@ router.get(
   projectsController.getWorkspaceMembers
 );
 
+router.delete(
+  "/projects/:id",
+  authMiddleware,
+  projectsController.deleteProject
+);
+
 module.exports = router;

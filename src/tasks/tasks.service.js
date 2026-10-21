@@ -519,10 +519,84 @@ const getTasksByProjectMember = async ({
   return tasksResult.rows;
 };
 
+
+
+// DELETE TASK API SERVICE
+
+const deleteTask = async ({ taskId, userId }) => {
+  const client = await pool.connect();
+
+
+  try {
+    await client.query("BEGIN");
+
+
+    // Check task exists and user has permission to delete it
+    const taskResult = await client.query(
+      `
+      SELECT t.id, t.project_id, t.name
+      FROM tasks t
+      JOIN projects p ON p.id = t.project_id
+      WHERE t.id = $1
+        AND p.status = 1
+        AND (
+          t.assignee_id = $2
+          OR p.created_by = $2
+          OR (
+            p.workspace_id IS NOT NULL
+            AND EXISTS (
+              SELECT 1
+              FROM workspace_members wm
+              WHERE wm.workspace_id = p.workspace_id
+                AND wm.user_id = $2
+                AND wm.status = 'ACTIVE'
+                AND wm.role IN ('OWNER', 'ADMIN')
+            )
+          )
+        )
+      FOR UPDATE OF t
+      `,
+      [taskId, userId]
+    );
+
+
+    if (taskResult.rowCount === 0) {
+      const error = new Error(
+        "Task not found or you are not allowed to delete it"
+      );
+      error.statusCode = 404;
+      throw error;
+    }
+
+
+    // Delete task
+    const deleteResult = await client.query(
+      `
+      DELETE FROM tasks
+      WHERE id = $1
+      RETURNING id, project_id, name
+      `,
+      [taskId]
+    );
+
+
+    await client.query("COMMIT");
+
+
+    return deleteResult.rows[0];
+  } catch (error) {
+    await client.query("ROLLBACK");
+    throw error;
+  } finally {
+    client.release();
+  }
+};
+
 module.exports = {
   createTask,
   editTask,
   updateTaskStatus,
   getTasksByProject,
   getTasksByProjectMember,
+  deleteTask
 };

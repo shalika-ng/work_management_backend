@@ -34,4 +34,6 @@ router.get(
   tasksController.getTasksByProjectMember
 );
 
+router.delete("/:taskId", authMiddleware, tasksController.deleteTask);
+
 module.exports = router;
