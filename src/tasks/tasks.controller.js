@@ -482,6 +482,43 @@ const deleteTask = async (req, res) => {
 };
 
 
+// DELETE PROJECT CONTROLLER:
+
+
+const deleteProject = async (req, res) => {
+  try {
+    const projectId = Number(req.params.id);
+
+    if (!Number.isSafeInteger(projectId) || projectId <= 0) {
+      return res.status(400).json({
+        success: false,
+        message: "Project ID must be a valid number",
+      });
+    }
+
+    const project = await projectsService.deleteProject({
+      projectId,
+      userId: req.user.id,
+    });
+
+    return res.status(200).json({
+      success: true,
+      message: "Project deactivated successfully",
+      data: project,
+    });
+  } catch (error) {
+    console.error("Delete project error:", error);
+
+    return res.status(error.statusCode || 500).json({
+      success: false,
+      message: error.statusCode
+        ? error.message
+        : "Failed to deactivate project",
+    });
+  }
+};
+
+
 module.exports = {
   createTask,
   editTask,
