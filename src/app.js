@@ -5,6 +5,7 @@ const authRoutes = require("./auth/auth.route");
 const dashboardRoutes = require("./dashboard/dashboard.route");
 const projectsRoutes = require("./projects/projects.route");
 const tasksRoutes = require("./tasks/tasks.route");
+const chatRoutes = require("./chat/chat.route");
 
 const app = express();
 
@@ -29,5 +30,6 @@ app.use("/api", projectsRoutes);
 
 // Tasks routes
 app.use("/api/tasks", tasksRoutes);
+app.use("/api/chat", chatRoutes);
 
 module.exports = app;
