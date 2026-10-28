@@ -21,6 +21,13 @@ app.get("/", (req, res) => {
   });
 });
 
+app.use(
+  "/uploads/tasks",
+  express.static(
+    path.join(process.cwd(), "uploads", "tasks")
+  )
+);
+
 // Auth routes
 app.use("/api/auth", authRoutes);
 

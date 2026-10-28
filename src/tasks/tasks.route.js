@@ -5,14 +5,19 @@ const authMiddleware = require("../middleware/auth.middleware");
 
 const router = express.Router();
 
+// CREATE TASK
 router.post(
   "/create-task",
   authMiddleware,
+  taskUpload.single("image"),
   tasksController.createTask
 );
+
+// EDIT TASK
 router.patch(
   "/:taskId",
   authMiddleware,
+  taskUpload.single("image"),
   tasksController.editTask
 );
 

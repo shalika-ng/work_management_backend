@@ -1,3 +1,4 @@
+
 exports.up = (pgm) => {
   pgm.createTable("tasks", {
     id: {
@@ -17,6 +18,12 @@ exports.up = (pgm) => {
     name: {
       type: "varchar(200)",
       notNull: true,
+    },
+
+    // Task description
+    description: {
+      type: "text",
+      notNull: false,
     },
 
     // User assigned to the task
@@ -53,12 +60,26 @@ exports.up = (pgm) => {
       default: 1,
     },
 
+    // Optional uploaded task image path
+    image_url: {
+      type: "varchar(500)",
+      notNull: false,
+    },
+
     // User who created the task
     created_by: {
       type: "integer",
       notNull: true,
       references: '"users"',
       onDelete: "CASCADE",
+    },
+
+    // User who last updated the task
+    updated_by: {
+      type: "integer",
+      notNull: false,
+      references: '"users"',
+      onDelete: "SET NULL",
     },
 
     created_at: {

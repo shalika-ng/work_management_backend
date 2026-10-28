@@ -1,5 +1,183 @@
 const tasksService = require("./tasks.service");
 
+// const createTask = async (req, res) => {
+//   try {
+//     const {
+//       project_id,
+//       name,
+//       description,
+//       assignee_id,
+//       due_date,
+//       priority,
+//       status,
+//     } = req.body;
+
+//     // --------------------------------------------------
+//     // Validate project ID
+//     // --------------------------------------------------
+
+//     if (
+//       project_id === undefined ||
+//       project_id === null ||
+//       project_id === ""
+//     ) {
+//       return res.status(400).json({
+//         success: false,
+//         message: "Project ID is required",
+//       });
+//     }
+
+//     const projectId = Number(project_id);
+
+//     if (
+//       !Number.isInteger(projectId) ||
+//       projectId <= 0
+//     ) {
+//       return res.status(400).json({
+//         success: false,
+//         message: "Project ID must be a valid number",
+//       });
+//     }
+
+//     // --------------------------------------------------
+//     // Validate task name
+//     // --------------------------------------------------
+
+//     if (
+//       !name ||
+//       typeof name !== "string" ||
+//       !name.trim()
+//     ) {
+//       return res.status(400).json({
+//         success: false,
+//         message: "Task name is required",
+//       });
+//     }
+
+//     // --------------------------------------------------
+//     // Validate assignee ID if provided
+//     // --------------------------------------------------
+
+//     let assigneeId = null;
+
+//     if (
+//       assignee_id !== undefined &&
+//       assignee_id !== null &&
+//       assignee_id !== ""
+//     ) {
+//       assigneeId = Number(assignee_id);
+
+//       if (
+//         !Number.isInteger(assigneeId) ||
+//         assigneeId <= 0
+//       ) {
+//         return res.status(400).json({
+//           success: false,
+//           message: "Assignee ID must be a valid number",
+//         });
+//       }
+//     }
+
+//     // --------------------------------------------------
+//     // Validate priority
+//     // --------------------------------------------------
+
+//     const taskPriority =
+//       priority === undefined ||
+//       priority === null ||
+//       priority === ""
+//         ? 2
+//         : Number(priority);
+
+//     if (
+//       !Number.isInteger(taskPriority) ||
+//       ![1, 2, 3].includes(taskPriority)
+//     ) {
+//       return res.status(400).json({
+//         success: false,
+//         message:
+//           "Priority must be 1 (Low), 2 (Medium), or 3 (High)",
+//       });
+//     }
+
+//     // --------------------------------------------------
+//     // Validate status
+//     // --------------------------------------------------
+
+//     const taskStatus =
+//       status === undefined ||
+//       status === null ||
+//       status === ""
+//         ? 1
+//         : Number(status);
+
+//     if (
+//       !Number.isInteger(taskStatus) ||
+//       ![1, 2, 3, 4, 5, 6, 7].includes(taskStatus)
+//     ) {
+//       return res.status(400).json({
+//         success: false,
+//         message: "Invalid task status",
+//       });
+//     }
+
+//     // --------------------------------------------------
+//     // Get logged-in user
+//     // --------------------------------------------------
+
+//     const userId = req.user.id;
+
+//     // --------------------------------------------------
+//     // Create task
+//     // --------------------------------------------------
+
+//     const task = await tasksService.createTask({
+//       projectId,
+//       name: name.trim(),
+//       description:
+//         description !== undefined &&
+//         description !== null &&
+//         description !== ""
+//           ? description
+//           : null,
+//       assigneeId,
+//       dueDate:
+//         due_date !== undefined &&
+//         due_date !== null &&
+//         due_date !== ""
+//           ? due_date
+//           : null,
+//       priority: taskPriority,
+//       status: taskStatus,
+//       userId,
+//     });
+
+//     // --------------------------------------------------
+//     // Success response
+//     // --------------------------------------------------
+
+//     return res.status(201).json({
+//       success: true,
+//       message: "Task created successfully",
+//       data: task,
+//     });
+//   } catch (error) {
+//     console.error("Create task error:", error);
+
+//     return res.status(error.statusCode || 500).json({
+//       success: false,
+//       message:
+//         error.statusCode
+//           ? error.message
+//           : "Failed to create task",
+//     });
+//   }
+// };
+
+
+// CREATE TASK API CONTROLLER
+
+
 const createTask = async (req, res) => {
   try {
     const {
@@ -12,10 +190,7 @@ const createTask = async (req, res) => {
       status,
     } = req.body;
 
-    // --------------------------------------------------
     // Validate project ID
-    // --------------------------------------------------
-
     if (
       project_id === undefined ||
       project_id === null ||
@@ -29,35 +204,26 @@ const createTask = async (req, res) => {
 
     const projectId = Number(project_id);
 
-    if (
-      !Number.isInteger(projectId) ||
-      projectId <= 0
-    ) {
+    if (!Number.isSafeInteger(projectId) || projectId <= 0) {
       return res.status(400).json({
         success: false,
         message: "Project ID must be a valid number",
       });
     }
 
-    // --------------------------------------------------
     // Validate task name
-    // --------------------------------------------------
-
     if (
-      !name ||
       typeof name !== "string" ||
-      !name.trim()
+      !name.trim() ||
+      name.trim().length > 200
     ) {
       return res.status(400).json({
         success: false,
-        message: "Task name is required",
+        message: "Task name is required and must be 200 characters or fewer",
       });
     }
 
-    // --------------------------------------------------
-    // Validate assignee ID if provided
-    // --------------------------------------------------
-
+    // Validate assignee (optional)
     let assigneeId = null;
 
     if (
@@ -67,10 +233,7 @@ const createTask = async (req, res) => {
     ) {
       assigneeId = Number(assignee_id);
 
-      if (
-        !Number.isInteger(assigneeId) ||
-        assigneeId <= 0
-      ) {
+      if (!Number.isSafeInteger(assigneeId) || assigneeId <= 0) {
         return res.status(400).json({
           success: false,
           message: "Assignee ID must be a valid number",
@@ -78,36 +241,22 @@ const createTask = async (req, res) => {
       }
     }
 
-    // --------------------------------------------------
     // Validate priority
-    // --------------------------------------------------
-
     const taskPriority =
-      priority === undefined ||
-      priority === null ||
-      priority === ""
+      priority === undefined || priority === null || priority === ""
         ? 2
         : Number(priority);
 
-    if (
-      !Number.isInteger(taskPriority) ||
-      ![1, 2, 3].includes(taskPriority)
-    ) {
+    if (!Number.isInteger(taskPriority) || ![1, 2, 3].includes(taskPriority)) {
       return res.status(400).json({
         success: false,
-        message:
-          "Priority must be 1 (Low), 2 (Medium), or 3 (High)",
+        message: "Priority must be 1 (Low), 2 (Medium), or 3 (High)",
       });
     }
 
-    // --------------------------------------------------
     // Validate status
-    // --------------------------------------------------
-
     const taskStatus =
-      status === undefined ||
-      status === null ||
-      status === ""
+      status === undefined || status === null || status === ""
         ? 1
         : Number(status);
 
@@ -121,15 +270,25 @@ const createTask = async (req, res) => {
       });
     }
 
-    // --------------------------------------------------
-    // Get logged-in user
-    // --------------------------------------------------
+    // Validate description (optional)
+    if (
+      description !== undefined &&
+      description !== null &&
+      typeof description !== "string"
+    ) {
+      return res.status(400).json({
+        success: false,
+        message: "Description must be a string or null",
+      });
+    }
 
+    // Optional uploaded image
+    const imageUrl = req.file
+      ? `/uploads/tasks/${req.file.filename}`
+      : null;
+
+    // Authenticated user
     const userId = req.user.id;
-
-    // --------------------------------------------------
-    // Create task
-    // --------------------------------------------------
 
     const task = await tasksService.createTask({
       projectId,
@@ -149,12 +308,9 @@ const createTask = async (req, res) => {
           : null,
       priority: taskPriority,
       status: taskStatus,
+      imageUrl,
       userId,
     });
-
-    // --------------------------------------------------
-    // Success response
-    // --------------------------------------------------
 
     return res.status(201).json({
       success: true,
@@ -166,24 +322,28 @@ const createTask = async (req, res) => {
 
     return res.status(error.statusCode || 500).json({
       success: false,
-      message:
-        error.statusCode
-          ? error.message
-          : "Failed to create task",
+      message: error.statusCode
+        ? error.message
+        : "Failed to create task",
     });
   }
 };
+
+// EDIT TASK API CONTROLLER
+
 
 const editTask = async (req, res) => {
   try {
     const taskId = Number(req.params.taskId);
     const body = req.body;
+
     const allowedFields = new Set([
       "name",
       "description",
       "assignee_id",
       "due_date",
       "priority",
+      "remove_image",
     ]);
 
     if (!Number.isSafeInteger(taskId) || taskId <= 0) {
@@ -201,16 +361,18 @@ const editTask = async (req, res) => {
     }
 
     const providedFields = Object.keys(body);
-    if (providedFields.length === 0) {
+
+    if (providedFields.length === 0 && !req.file) {
       return res.status(400).json({
         success: false,
-        message: "At least one task field must be provided",
+        message: "Provide at least one field or image to update",
       });
     }
 
     const unsupportedFields = providedFields.filter(
       (field) => !allowedFields.has(field)
     );
+
     if (unsupportedFields.length > 0) {
       return res.status(400).json({
         success: false,
@@ -221,28 +383,31 @@ const editTask = async (req, res) => {
     const changes = {};
 
     if (Object.hasOwn(body, "name")) {
-      if (typeof body.name !== "string" || !body.name.trim()) {
+      if (
+        typeof body.name !== "string" ||
+        !body.name.trim() ||
+        body.name.trim().length > 200
+      ) {
         return res.status(400).json({
           success: false,
-          message: "Task name must be a non-empty string",
+          message: "Task name must be non-empty and 200 characters or fewer",
         });
       }
-      if (body.name.trim().length > 200) {
-        return res.status(400).json({
-          success: false,
-          message: "Task name must be 200 characters or fewer",
-        });
-      }
+
       changes.name = body.name.trim();
     }
 
     if (Object.hasOwn(body, "description")) {
-      if (body.description !== null && typeof body.description !== "string") {
+      if (
+        body.description !== null &&
+        typeof body.description !== "string"
+      ) {
         return res.status(400).json({
           success: false,
           message: "Description must be a string or null",
         });
       }
+
       changes.description = body.description || null;
     }
 
@@ -251,12 +416,14 @@ const editTask = async (req, res) => {
         changes.assigneeId = null;
       } else {
         const assigneeId = Number(body.assignee_id);
+
         if (!Number.isSafeInteger(assigneeId) || assigneeId <= 0) {
           return res.status(400).json({
             success: false,
             message: "Assignee ID must be a valid number or null",
           });
         }
+
         changes.assigneeId = assigneeId;
       }
     }
@@ -266,11 +433,13 @@ const editTask = async (req, res) => {
         changes.dueDate = null;
       } else {
         const dueDate = body.due_date;
+
         const parsedDate =
           typeof dueDate === "string" &&
           /^\d{4}-\d{2}-\d{2}$/.test(dueDate)
             ? new Date(`${dueDate}T00:00:00.000Z`)
             : null;
+
         if (
           !parsedDate ||
           Number.isNaN(parsedDate.getTime()) ||
@@ -278,22 +447,54 @@ const editTask = async (req, res) => {
         ) {
           return res.status(400).json({
             success: false,
-            message: "Due date must be a valid date in YYYY-MM-DD format or null",
+            message: "Due date must be YYYY-MM-DD or null",
           });
         }
+
         changes.dueDate = dueDate;
       }
     }
 
     if (Object.hasOwn(body, "priority")) {
-      const priority = Number(body.priority);
-      if (!Number.isInteger(priority) || ![1, 2, 3].includes(priority)) {
+      const taskPriority = Number(body.priority);
+
+      if (
+        !Number.isInteger(taskPriority) ||
+        ![1, 2, 3].includes(taskPriority)
+      ) {
         return res.status(400).json({
           success: false,
           message: "Priority must be 1 (Low), 2 (Medium), or 3 (High)",
         });
       }
-      changes.priority = priority;
+
+      changes.priority = taskPriority;
+    }
+
+    const removeImage =
+      body.remove_image === true || body.remove_image === "true";
+
+    if (
+      body.remove_image !== undefined &&
+      ![true, false, "true", "false"].includes(body.remove_image)
+    ) {
+      return res.status(400).json({
+        success: false,
+        message: "remove_image must be true or false",
+      });
+    }
+
+    if (req.file && removeImage) {
+      return res.status(400).json({
+        success: false,
+        message: "Upload a replacement image or remove the image, not both",
+      });
+    }
+
+    if (req.file) {
+      changes.imageUrl = `/uploads/tasks/${req.file.filename}`;
+    } else if (removeImage) {
+      changes.imageUrl = null;
     }
 
     const task = await tasksService.editTask({
@@ -309,12 +510,159 @@ const editTask = async (req, res) => {
     });
   } catch (error) {
     console.error("Edit task error:", error);
+
     return res.status(error.statusCode || 500).json({
       success: false,
-      message: error.statusCode ? error.message : "Failed to update task",
+      message: error.statusCode
+        ? error.message
+        : "Failed to update task",
     });
   }
 };
+
+
+
+// const editTask = async (req, res) => {
+//   try {
+//     const taskId = Number(req.params.taskId);
+//     const body = req.body;
+//     const allowedFields = new Set([
+//       "name",
+//       "description",
+//       "assignee_id",
+//       "due_date",
+//       "priority",
+//     ]);
+
+//     if (!Number.isSafeInteger(taskId) || taskId <= 0) {
+//       return res.status(400).json({
+//         success: false,
+//         message: "Task ID must be a valid number",
+//       });
+//     }
+
+//     if (!body || typeof body !== "object" || Array.isArray(body)) {
+//       return res.status(400).json({
+//         success: false,
+//         message: "Request body must be an object",
+//       });
+//     }
+
+//     const providedFields = Object.keys(body);
+//     if (providedFields.length === 0) {
+//       return res.status(400).json({
+//         success: false,
+//         message: "At least one task field must be provided",
+//       });
+//     }
+
+//     const unsupportedFields = providedFields.filter(
+//       (field) => !allowedFields.has(field)
+//     );
+//     if (unsupportedFields.length > 0) {
+//       return res.status(400).json({
+//         success: false,
+//         message: `Unsupported task field(s): ${unsupportedFields.join(", ")}`,
+//       });
+//     }
+
+//     const changes = {};
+
+//     if (Object.hasOwn(body, "name")) {
+//       if (typeof body.name !== "string" || !body.name.trim()) {
+//         return res.status(400).json({
+//           success: false,
+//           message: "Task name must be a non-empty string",
+//         });
+//       }
+//       if (body.name.trim().length > 200) {
+//         return res.status(400).json({
+//           success: false,
+//           message: "Task name must be 200 characters or fewer",
+//         });
+//       }
+//       changes.name = body.name.trim();
+//     }
+
+//     if (Object.hasOwn(body, "description")) {
+//       if (body.description !== null && typeof body.description !== "string") {
+//         return res.status(400).json({
+//           success: false,
+//           message: "Description must be a string or null",
+//         });
+//       }
+//       changes.description = body.description || null;
+//     }
+
+//     if (Object.hasOwn(body, "assignee_id")) {
+//       if (body.assignee_id === null || body.assignee_id === "") {
+//         changes.assigneeId = null;
+//       } else {
+//         const assigneeId = Number(body.assignee_id);
+//         if (!Number.isSafeInteger(assigneeId) || assigneeId <= 0) {
+//           return res.status(400).json({
+//             success: false,
+//             message: "Assignee ID must be a valid number or null",
+//           });
+//         }
+//         changes.assigneeId = assigneeId;
+//       }
+//     }
+
+//     if (Object.hasOwn(body, "due_date")) {
+//       if (body.due_date === null || body.due_date === "") {
+//         changes.dueDate = null;
+//       } else {
+//         const dueDate = body.due_date;
+//         const parsedDate =
+//           typeof dueDate === "string" &&
+//           /^\d{4}-\d{2}-\d{2}$/.test(dueDate)
+//             ? new Date(`${dueDate}T00:00:00.000Z`)
+//             : null;
+//         if (
+//           !parsedDate ||
+//           Number.isNaN(parsedDate.getTime()) ||
+//           parsedDate.toISOString().slice(0, 10) !== dueDate
+//         ) {
+//           return res.status(400).json({
+//             success: false,
+//             message: "Due date must be a valid date in YYYY-MM-DD format or null",
+//           });
+//         }
+//         changes.dueDate = dueDate;
+//       }
+//     }
+
+//     if (Object.hasOwn(body, "priority")) {
+//       const priority = Number(body.priority);
+//       if (!Number.isInteger(priority) || ![1, 2, 3].includes(priority)) {
+//         return res.status(400).json({
+//           success: false,
+//           message: "Priority must be 1 (Low), 2 (Medium), or 3 (High)",
+//         });
+//       }
+//       changes.priority = priority;
+//     }
+
+//     const task = await tasksService.editTask({
+//       taskId,
+//       changes,
+//       userId: req.user.id,
+//     });
+
+//     return res.status(200).json({
+//       success: true,
+//       message: "Task updated successfully",
+//       data: task,
+//     });
+//   } catch (error) {
+//     console.error("Edit task error:", error);
+//     return res.status(error.statusCode || 500).json({
+//       success: false,
+//       message: error.statusCode ? error.message : "Failed to update task",
+//     });
+//   }
+// };
 
 const updateTaskStatus = async (req, res) => {
   try {
