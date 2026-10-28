@@ -1,7 +1,10 @@
+
 exports.up = (pgm) => {
-  pgm.addColumn("tasks", "image_url", {
-    type: "varchar(500)",
-    notNull: false,
+  pgm.addColumn("tasks", {
+    image_url: {
+      type: "varchar(500)",
+      notNull: false,
+    },
   });
 };
 
