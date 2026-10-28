@@ -27,4 +27,43 @@ router.patch(
   chatController.markRead
 );
 
+// EDIT MESSAGE
+
+
+router.patch(
+  "/conversations/:conversationId/messages/:messageId",
+  chatController.editMessage
+);
+
+// DELETE  MESSAGE 
+router.delete(
+  "/conversations/:conversationId/messages/:messageId",
+  chatController.deleteMessage
+);
+
+// ADD MEMBER TO GROUP CHAT CONVERSATION
+
+
+router.post(
+  "/conversations/:conversationId/members",
+  chatController.addGroupMembers
+);
+
+// REMOVE GROUP MEMBER
+
+
+router.delete(
+  "/conversations/:conversationId/members/:memberId",
+  chatController.removeGroupMember
+);
+
+// RENAME A GROUP 
+
+router.patch(
+  "/conversations/:conversationId",
+  chatController.renameGroup
+);
+
+
+
 module.exports = router;

@@ -101,7 +101,9 @@ exports.getMessages = async (req, res) => {
   }
 };
 
-// POST /api/chat/conversations/:conversationId/messages
+// SEND MESSAGE 
+
+
 exports.sendMessage = async (req, res) => {
   try {
     const userId = getUserId(req);
@@ -113,6 +115,16 @@ exports.sendMessage = async (req, res) => {
       req.body?.content
     );
 
+    // Broadcast only after the message has been saved successfully.
+    const io = req.app.get("io");
+
+    if (io) {
+      io.to(`conversation:${conversationId}`).emit(
+        "message:new",
+        data
+      );
+    }
+
     return res.status(201).json({
       success: true,
       data,
@@ -121,6 +133,7 @@ exports.sendMessage = async (req, res) => {
     return handleError(res, error);
   }
 };
+
 
 // PATCH /api/chat/conversations/:conversationId/read
 exports.markRead = async (req, res) => {
@@ -141,3 +154,150 @@ exports.markRead = async (req, res) => {
     return handleError(res, error);
   }
 };
+
+
+// EDIT MESSAGE
+
+exports.editMessage = async (req, res) => {
+  try {
+    const userId = getUserId(req);
+    const conversationId = getConversationId(req);
+    const messageId = Number(req.params.messageId);
+
+    if (!Number.isSafeInteger(messageId) || messageId <= 0) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid message ID.",
+      });
+    }
+
+    const data = await chatService.editMessage(
+      userId,
+      conversationId,
+      messageId,
+      req.body?.content
+    );
+
+    return res.status(200).json({
+      success: true,
+      data,
+    });
+  } catch (error) {
+    return handleError(res, error);
+  }
+};
+
+// DELETE MESSAGE 
+
+
+exports.deleteMessage = async (req, res) => {
+  try {
+    const userId = getUserId(req);
+    const conversationId = getConversationId(req);
+    const messageId = Number(req.params.messageId);
+
+    if (!Number.isSafeInteger(messageId) || messageId <= 0) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid message ID.",
+      });
+    }
+
+    const data = await chatService.deleteMessage(
+      userId,
+      conversationId,
+      messageId
+    );
+
+    return res.status(200).json({
+      success: true,
+      message: "Message deleted successfully.",
+      data,
+    });
+  } catch (error) {
+    return handleError(res, error);
+  }
+};
+
+// ADD MEMBER TO GROUP CONVERSATION
+
+
+exports.addGroupMembers = async (req, res) => {
+  try {
+    const userId = getUserId(req);
+    const conversationId = getConversationId(req);
+
+    const data = await chatService.addGroupMembers(
+      userId,
+      conversationId,
+      req.body?.member_ids
+    );
+
+    return res.status(200).json({
+      success: true,
+      message: "Group members added successfully.",
+      data,
+    });
+  } catch (error) {
+    return handleError(res, error);
+  }
+};
+
+// REMOVE GROUP MEMBER
+
+
+exports.removeGroupMember = async (req, res) => {
+  try {
+    const userId = getUserId(req);
+    const conversationId = getConversationId(req);
+    const memberId = Number(req.params.memberId);
+
+    if (!Number.isSafeInteger(memberId) || memberId <= 0) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid member ID.",
+      });
+    }
+
+    const data = await chatService.removeGroupMember(
+      userId,
+      conversationId,
+      memberId
+    );
+
+    return res.status(200).json({
+      success: true,
+      message: "Group member removed successfully.",
+      data,
+    });
+  } catch (error) {
+    return handleError(res, error);
+  }
+};
+
+// RENAME A GROUP 
+
+exports.renameGroup = async (req, res) => {
+  try {
+    const userId = getUserId(req);
+    const conversationId = getConversationId(req);
+
+    const data = await chatService.renameGroup(
+      userId,
+      conversationId,
+      req.body?.name
+    );
+
+    return res.status(200).json({
+      success: true,
+      message: "Group renamed successfully.",
+      data,
+    });
+  } catch (error) {
+    return handleError(res, error);
+  }
+};
+
+
+
+

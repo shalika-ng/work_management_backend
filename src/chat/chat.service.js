@@ -375,10 +375,471 @@ async function markConversationRead(userId, conversationId) {
   }
 }
 
+
+
+// EDIT MESSAGE :
+
+async function editMessage(userId, conversationId, messageId, content) {
+  const message = typeof content === "string" ? content.trim() : "";
+
+  if (!message || message.length > 5000) {
+    throw createError(
+      "Message must contain between 1 and 5000 characters."
+    );
+  }
+
+  const client = await pool.connect();
+
+  try {
+    const membership = await client.query(
+      `SELECT 1
+       FROM chat_conversation_members
+       WHERE conversation_id = $1
+         AND user_id = $2`,
+      [conversationId, userId]
+    );
+
+    if (!membership.rowCount) {
+      throw createError(
+        "You cannot edit messages in this conversation.",
+        403
+      );
+    }
+
+    const result = await client.query(
+      `UPDATE chat_messages
+       SET content = $1,
+           edited_at = CURRENT_TIMESTAMP
+       WHERE id = $2
+         AND conversation_id = $3
+         AND sender_id = $4
+         AND deleted_at IS NULL
+       RETURNING
+         id,
+         conversation_id,
+         sender_id,
+         content,
+         created_at,
+         edited_at`,
+      [message, messageId, conversationId, userId]
+    );
+
+    if (!result.rowCount) {
+      throw createError(
+        "Message not found or you cannot edit this message.",
+        404
+      );
+    }
+
+    await client.query(
+      `UPDATE chat_conversations
+       SET updated_at = CURRENT_TIMESTAMP
+       WHERE id = $1`,
+      [conversationId]
+    );
+
+    return result.rows[0];
+  } finally {
+    client.release();
+  }
+}
+
+// DELETE MESSAGE 
+
+async function deleteMessage(userId, conversationId, messageId) {
+  const client = await pool.connect();
+
+  try {
+    const membership = await client.query(
+      `SELECT 1
+       FROM chat_conversation_members
+       WHERE conversation_id = $1
+         AND user_id = $2`,
+      [conversationId, userId]
+    );
+
+    if (!membership.rowCount) {
+      throw createError(
+        "You cannot delete messages in this conversation.",
+        403
+      );
+    }
+
+    const result = await client.query(
+      `UPDATE chat_messages
+       SET deleted_at = CURRENT_TIMESTAMP
+       WHERE id = $1
+         AND conversation_id = $2
+         AND sender_id = $3
+         AND deleted_at IS NULL
+       RETURNING
+         id,
+         conversation_id,
+         sender_id,
+         deleted_at`,
+      [messageId, conversationId, userId]
+    );
+
+    if (!result.rowCount) {
+      throw createError(
+        "Message not found or you cannot delete this message.",
+        404
+      );
+    }
+
+    await client.query(
+      `UPDATE chat_conversations
+       SET updated_at = CURRENT_TIMESTAMP
+       WHERE id = $1`,
+      [conversationId]
+    );
+
+    return result.rows[0];
+  } finally {
+    client.release();
+  }
+}
+
+// ADD MEMBERS TO GROUP CHAT CONVERSATION
+
+async function addGroupMembers(userId, conversationId, memberIds = []) {
+  if (!Array.isArray(memberIds) || memberIds.length === 0) {
+    throw createError("Provide at least one member ID.");
+  }
+
+  const requestedIds = memberIds.map((id) =>
+    parseId(id, "member ID")
+  );
+
+  // Remove duplicate IDs from the request.
+  const uniqueIds = [...new Set(requestedIds)];
+
+  if (uniqueIds.length > 100) {
+    throw createError("You can add at most 100 members at a time.");
+  }
+
+  const client = await pool.connect();
+
+  try {
+    await client.query("BEGIN");
+
+    // Lock the conversation while checking permissions and adding members.
+    const conversationResult = await client.query(
+      `SELECT id, workspace_id, type, created_by
+       FROM chat_conversations
+       WHERE id = $1
+       FOR UPDATE`,
+      [conversationId]
+    );
+
+    if (!conversationResult.rowCount) {
+      throw createError("Conversation not found.", 404);
+    }
+
+    const conversation = conversationResult.rows[0];
+
+    if (conversation.type !== "group") {
+      throw createError(
+        "Members can only be added to group conversations."
+      );
+    }
+
+    if (Number(conversation.created_by) !== Number(userId)) {
+      throw createError(
+        "Only the group creator can add members.",
+        403
+      );
+    }
+
+    // The creator must still belong to the conversation.
+    const creatorMembership = await client.query(
+      `SELECT 1
+       FROM chat_conversation_members
+       WHERE conversation_id = $1
+         AND user_id = $2`,
+      [conversationId, userId]
+    );
+
+    if (!creatorMembership.rowCount) {
+      throw createError(
+        "You are no longer a member of this conversation.",
+        403
+      );
+    }
+
+    // All requested users must be active members of this workspace.
+    const activeMembersResult = await client.query(
+      `SELECT user_id
+       FROM workspace_members
+       WHERE workspace_id = $1
+         AND user_id = ANY($2::integer[])
+         AND status = 'ACTIVE'`,
+      [conversation.workspace_id, uniqueIds]
+    );
+
+    const activeIds = new Set(
+      activeMembersResult.rows.map((row) => Number(row.user_id))
+    );
+
+    if (uniqueIds.some((id) => !activeIds.has(id))) {
+      throw createError(
+        "All added users must be active members of this workspace.",
+        403
+      );
+    }
+
+    // Find which requested users are not already in the group.
+    const existingMembersResult = await client.query(
+      `SELECT user_id
+       FROM chat_conversation_members
+       WHERE conversation_id = $1
+         AND user_id = ANY($2::integer[])`,
+      [conversationId, uniqueIds]
+    );
+
+    const existingIds = new Set(
+      existingMembersResult.rows.map((row) => Number(row.user_id))
+    );
+
+    const newMemberIds = uniqueIds.filter(
+      (id) => !existingIds.has(id)
+    );
+
+    // Check the final group size before inserting.
+    const countResult = await client.query(
+      `SELECT COUNT(*) AS total
+       FROM chat_conversation_members
+       WHERE conversation_id = $1`,
+      [conversationId]
+    );
+
+    const currentCount = Number(countResult.rows[0].total);
+
+    if (currentCount + newMemberIds.length > 100) {
+      throw createError(
+        "A group conversation can contain at most 100 members."
+      );
+    }
+
+    const addedMembers = [];
+
+    for (const memberId of newMemberIds) {
+      const insertResult = await client.query(
+        `INSERT INTO chat_conversation_members
+           (conversation_id, user_id)
+         VALUES ($1, $2)
+         ON CONFLICT (conversation_id, user_id) DO NOTHING
+         RETURNING conversation_id, user_id, joined_at`,
+        [conversationId, memberId]
+      );
+
+      if (insertResult.rowCount) {
+        addedMembers.push(insertResult.rows[0]);
+      }
+    }
+
+    await client.query(
+      `UPDATE chat_conversations
+       SET updated_at = CURRENT_TIMESTAMP
+       WHERE id = $1`,
+      [conversationId]
+    );
+
+    await client.query("COMMIT");
+
+    return {
+      conversation_id: conversationId,
+      added_count: addedMembers.length,
+      members: addedMembers,
+    };
+  } catch (error) {
+    await client.query("ROLLBACK");
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
+// REMOVE GROUP MEMBER
+
+async function removeGroupMember(userId, conversationId, memberId) {
+  memberId = parseId(memberId, "member ID");
+
+  if (Number(userId) === memberId) {
+    throw createError(
+      "The group creator cannot remove themselves."
+    );
+  }
+
+  const client = await pool.connect();
+
+  try {
+    await client.query("BEGIN");
+
+    const conversationResult = await client.query(
+      `SELECT id, type, created_by
+       FROM chat_conversations
+       WHERE id = $1
+       FOR UPDATE`,
+      [conversationId]
+    );
+
+    if (!conversationResult.rowCount) {
+      throw createError("Conversation not found.", 404);
+    }
+
+    const conversation = conversationResult.rows[0];
+
+    if (conversation.type !== "group") {
+      throw createError(
+        "Members can only be removed from group conversations."
+      );
+    }
+
+    if (Number(conversation.created_by) !== Number(userId)) {
+      throw createError(
+        "Only the group creator can remove members.",
+        403
+      );
+    }
+
+    const creatorMembership = await client.query(
+      `SELECT 1
+       FROM chat_conversation_members
+       WHERE conversation_id = $1
+         AND user_id = $2`,
+      [conversationId, userId]
+    );
+
+    if (!creatorMembership.rowCount) {
+      throw createError(
+        "You are no longer a member of this conversation.",
+        403
+      );
+    }
+
+    const result = await client.query(
+      `DELETE FROM chat_conversation_members
+       WHERE conversation_id = $1
+         AND user_id = $2
+       RETURNING conversation_id, user_id`,
+      [conversationId, memberId]
+    );
+
+    if (!result.rowCount) {
+      throw createError(
+        "Member not found in this group.",
+        404
+      );
+    }
+
+    await client.query(
+      `UPDATE chat_conversations
+       SET updated_at = CURRENT_TIMESTAMP
+       WHERE id = $1`,
+      [conversationId]
+    );
+
+    await client.query("COMMIT");
+
+    return result.rows[0];
+  } catch (error) {
+    await client.query("ROLLBACK");
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
+
+// RENAME A GROUP 
+
+async function renameGroup(userId, conversationId, name) {
+  const groupName = typeof name === "string" ? name.trim() : "";
+
+  if (!groupName || groupName.length > 150) {
+    throw createError(
+      "Group name is required and limited to 150 characters."
+    );
+  }
+
+  const client = await pool.connect();
+
+  try {
+    await client.query("BEGIN");
+
+    const conversationResult = await client.query(
+      `SELECT id, type, created_by
+       FROM chat_conversations
+       WHERE id = $1
+       FOR UPDATE`,
+      [conversationId]
+    );
+
+    if (!conversationResult.rowCount) {
+      throw createError("Conversation not found.", 404);
+    }
+
+    const conversation = conversationResult.rows[0];
+
+    if (conversation.type !== "group") {
+      throw createError(
+        "Only group conversations can be renamed."
+      );
+    }
+
+    if (Number(conversation.created_by) !== Number(userId)) {
+      throw createError(
+        "Only the group creator can rename this group.",
+        403
+      );
+    }
+
+    const creatorMembership = await client.query(
+      `SELECT 1
+       FROM chat_conversation_members
+       WHERE conversation_id = $1
+         AND user_id = $2`,
+      [conversationId, userId]
+    );
+
+    if (!creatorMembership.rowCount) {
+      throw createError(
+        "You are no longer a member of this conversation.",
+        403
+      );
+    }
+
+    const result = await client.query(
+      `UPDATE chat_conversations
+       SET name = $1,
+           updated_at = CURRENT_TIMESTAMP
+       WHERE id = $2
+       RETURNING id, workspace_id, type, name, created_by, updated_at`,
+      [groupName, conversationId]
+    );
+
+    await client.query("COMMIT");
+
+    return result.rows[0];
+  } catch (error) {
+    await client.query("ROLLBACK");
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
+
 module.exports = {
   getConversations,
   createConversation,
   getMessages,
   sendMessage,
   markConversationRead,
+  editMessage,
+  deleteMessage,
+  addGroupMembers,
+  removeGroupMember,
+  renameGroup
 };
