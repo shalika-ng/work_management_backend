@@ -2,6 +2,8 @@ const express = require("express");
 
 const tasksController = require("./tasks.controller");
 const authMiddleware = require("../middleware/auth.middleware");
+const taskUpload = require("../middleware/taskUpload.middleware");
+const path = require("path"); 
 
 const router = express.Router();
 
